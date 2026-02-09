@@ -6,27 +6,52 @@ from urllib.parse import urlparse
 from pathlib import Path
 import numpy as np
 import lxml
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def parse_links(dir_path):
+def parse_single_file(fname, dir_path, files):
+    local_incoming = defaultdict(int)
+    local_outgoing = defaultdict(int)
+    local_graph = defaultdict(set)
+
+    path = os.path.join(dir_path, fname)
+    with open(path, encoding="utf-8", errors="ignore") as f:
+        soup = BeautifulSoup(f, "lxml")
+
+    local_outgoing[fname] += 0
+    local_incoming[fname] += 0
+
+    for a in soup.find_all("a", href=True):
+        target = os.path.basename(urlparse(a["href"]).path)
+        if target in files:
+            local_outgoing[fname] += 1
+            local_incoming[target] += 1
+            local_graph[target].add(fname)
+
+    return local_incoming, local_outgoing, local_graph
+
+
+def parse_links(dir_path, max_workers=None):
     incoming = defaultdict(int)
     outgoing = defaultdict(int)
     graph = defaultdict(set)
+
     files = {f for f in os.listdir(dir_path) if f.endswith(".html")}
 
-    for fname in files:
-        path = os.path.join(dir_path, fname)
-        with open(path, encoding="utf-8", errors="ignore") as f:
-            soup = BeautifulSoup(f, "lxml")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(parse_single_file, fname, dir_path, files)
+            for fname in files
+        ]
 
-        outgoing[fname] += 0
-        incoming[fname] += 0
+        for future in as_completed(futures):
+            loc_in, loc_out, loc_graph = future.result()
 
-        for a in soup.find_all("a", href=True):
-            target = os.path.basename(urlparse(a["href"]).path)
-            if target in files:
-                outgoing[fname] += 1
-                incoming[target] += 1
-                graph[target].add(fname)
+            for k, v in loc_in.items():
+                incoming[k] += v
+            for k, v in loc_out.items():
+                outgoing[k] += v
+            for k, v in loc_graph.items():
+                graph[k].update(v)
 
     return files, outgoing, incoming, graph
 

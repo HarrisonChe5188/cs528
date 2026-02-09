@@ -132,7 +132,7 @@ def test():
 # Main
 def main():
     BUCKET_NAME = "hche-cs528-hw2"
-    PREFIX = "generated_links/"
+    PREFIX = "links/"
 
     print("Reading and parsing files from Google Cloud Storage concurrently...")
     files, outgoing, incoming, graph = parse_links_gcs_concurrent(BUCKET_NAME, PREFIX, max_workers=32)
