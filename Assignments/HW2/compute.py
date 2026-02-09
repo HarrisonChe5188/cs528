@@ -106,7 +106,6 @@ def test():
     pr1 = compute_pagerank(files, graph, outgoing)
     pr2 = compute_pagerank(files, graph, outgoing)
 
-    # 1. PageRank sums to ~1
     total = sum(pr1.values())
     assert abs(total - 1.0) < 1e-6, f"Total PR {total} != 1.0"
 
@@ -125,6 +124,8 @@ def test():
     for page, score in sorted(pr1.items(), key=lambda x: x[1], reverse=True):
         print(f"{page}: {score:.6f}")
 
+
+# main
 def main():
     BASE_DIR = Path(__file__).resolve().parent
     LINK_DIR = BASE_DIR / "generated_links"
