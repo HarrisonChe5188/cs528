@@ -51,8 +51,8 @@ def generate_file(idx, max_refs, num_files):
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument('-n', '--num_files', help="Specify the number of files to generate", type=int, default=10000)
-  parser.add_argument('-m', '--max_refs', type=int, help="Specify the maximum number of references per file", default=250)
+  parser.add_argument('-n', '--num_files', help="Specify the number of files to generate", type=int, default=20000)
+  parser.add_argument('-m', '--max_refs', type=int, help="Specify the maximum number of references per file", default=375)
   args = parser.parse_args()
   random.seed(0)
 
