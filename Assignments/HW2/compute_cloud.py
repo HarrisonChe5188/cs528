@@ -8,7 +8,7 @@ import numpy as np
 import os
 import lxml
 
-# Read in the HTML files and parse links to build the graph structure
+# Process a single blob to extract outgoing links and count them
 def process_blob(blob, files):
     fname = os.path.basename(blob.name)
     try:
@@ -80,7 +80,7 @@ def print_stats(name, arr):
     print(f"Max: {max(arr)}")
     print(f"Mean: {statistics.mean(arr):.2f}")
     print(f"Median: {statistics.median(arr)}")
-    q = np.percentile(arr, [20, 40, 60, 80])
+    q = np.percentile(arr, [0, 20, 40, 60, 80, 100])
     print(f"Quintiles (20/40/60/80 %): {q.astype(int)}")
 
 def compute_stats(incoming, outgoing):
@@ -131,7 +131,7 @@ def test():
 
 # Main
 def main():
-    BUCKET_NAME = "hche-hw2"
+    BUCKET_NAME = "hche-cs528-hw2"
     PREFIX = "generated_links/"
 
     print("Reading and parsing files from Google Cloud Storage concurrently...")

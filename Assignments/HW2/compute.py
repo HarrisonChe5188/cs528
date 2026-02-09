@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from pathlib import Path
 import numpy as np
+import lxml
 
 def parse_links(dir_path):
     incoming = defaultdict(int)
@@ -15,7 +16,7 @@ def parse_links(dir_path):
     for fname in files:
         path = os.path.join(dir_path, fname)
         with open(path, encoding="utf-8", errors="ignore") as f:
-            soup = BeautifulSoup(f, "html.parser")
+            soup = BeautifulSoup(f, "lxml")
 
         outgoing[fname] += 0
         incoming[fname] += 0
@@ -36,7 +37,7 @@ def print_stats(name, arr):
     print(f"Max: {max(arr)}")
     print(f"Mean: {statistics.mean(arr):.2f}")
     print(f"Median: {statistics.median(arr)}")
-    q = np.percentile(arr, [20, 40, 60, 80])
+    q = np.percentile(arr, [0, 20, 40, 60, 80, 100])
     print(f"Quintiles (20/40/60/80 %): {q.astype(int)}")
 
 def compute_stats(incoming, outgoing):
