@@ -41,7 +41,7 @@ def generate_file(idx, max_refs, num_files):
   with open(fname, 'w', encoding="utf-8") as f:
     # how many references in this file
     add_headers(f)
-    num_refs = random.randrange(0,max_refs)
+    num_refs = random.randrange(1,max_refs)
     for i in range(0,num_refs):
       add_text(f)
       lnk = random.randrange(0,num_files)

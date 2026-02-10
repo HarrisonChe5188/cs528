@@ -1,34 +1,32 @@
 from collections import defaultdict
-import statistics
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.cloud import storage
-import numpy as np
 import os
+import statistics
+import numpy as np
 import lxml
 
 # Process a single blob to extract outgoing links and count them
 def process_blob(blob, files):
     fname = os.path.basename(blob.name)
     try:
-        html_bytes = blob.download_as_bytes()
-        html = html_bytes.decode("utf-8", errors="ignore")
+        html = blob.download_as_text()
     except Exception as e:
-        print(f"Failed to read {fname}: {e}")
-        return fname, 0, []
+        
+        return fname, 0, set(), True
 
-    soup = BeautifulSoup(html, "lxml")  
-    links = []
     out_count = 0
-    for a in soup.find_all("a", href=True):
+    targets = set()
+    for a in BeautifulSoup(html, "lxml").find_all   ("a", href=True):
         target = os.path.basename(urlparse(a["href"]).path)
         if target in files:
             out_count += 1
-            links.append(target)
-    return fname, out_count, links
+            targets.add(target)
+    return fname, out_count, targets, False  
 
-# Incorporate concurrent processing to read and parse files from GCS efficiently (runs slow without concurrency)
+# Concurrently parse all blobs
 def parse_links_gcs_concurrent(bucket_name, prefix, max_workers=32):
     incoming = defaultdict(int)
     outgoing = defaultdict(int)
@@ -36,44 +34,61 @@ def parse_links_gcs_concurrent(bucket_name, prefix, max_workers=32):
 
     client = storage.Client()
     bucket = client.bucket(bucket_name)
-    blobs = list(bucket.list_blobs(prefix=prefix))
+    blobs = [
+        blob for blob in bucket.list_blobs(prefix=prefix)
+        if blob.name.endswith(".html")
+    ]
     files = {os.path.basename(blob.name) for blob in blobs if blob.name.endswith(".html")}
+
+    failed_count = 0
+    processed = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(process_blob, blob, files): blob for blob in blobs}
         for future in as_completed(futures):
-            fname, out_count, links = future.result()
+            fname, out_count, links, failed = future.result()
+            if failed:
+                failed_count += 1
+
             outgoing[fname] = out_count
             for target in links:
                 incoming[target] += 1
                 graph[target].add(fname)
 
+            processed += 1
+            if processed % 1000 == 0:
+                print(f"Processed {processed}/{len(files)} files...")
+
+    print(f"Finished processing {len(files)} files. Failed to read {failed_count} files.")
     return files, outgoing, incoming, graph
 
 def compute_pagerank(files, graph, outgoing, tol=0.005, d=0.85):
     n = len(files)
     base = (1 - d) / n
     pagerank = {page: 1 / n for page in files}
+    out_degree = {page: outgoing.get(page, 0) for page in files}
 
-    def total_pr(pr):
-        return sum(pr.values())
-
+    iteration = 0
     while True:
+        iteration += 1
         new_pr = {}
         for page in files:
             rank_sum = 0.0
             for incoming_page in graph.get(page, []):
-                if outgoing[incoming_page] > 0:
-                    rank_sum += pagerank[incoming_page] / outgoing[incoming_page]
+                if out_degree[incoming_page] > 0:
+                    rank_sum += pagerank[incoming_page] / out_degree[incoming_page]
             new_pr[page] = base + d * rank_sum
 
-        old_sum = total_pr(pagerank)
-        new_sum = total_pr(new_pr)
-        if abs(new_sum - old_sum) / old_sum <= tol:
-            print(f"PageRank sum: {sum(new_pr.values()):.6f}")
-            return new_pr
-        pagerank = new_pr
+        delta = sum(abs(new_pr[p] - pagerank[p]) for p in files)
+        print(f"Iteration {iteration}: delta={delta:.6f}")
 
+        if delta <= tol:
+            print(f"PageRank converged after {iteration} iterations.")
+            print(f"PageRank sum: {sum(new_pr.values()):.6f}")
+
+            return new_pr
+
+        pagerank = new_pr
 def print_stats(name, arr):
     print(f"\n{name} Links:")
     print(f"Min: {min(arr)}")
@@ -132,7 +147,7 @@ def test():
 # Main
 def main():
     BUCKET_NAME = "hche-cs528-hw2"
-    PREFIX = "links/"
+    PREFIX = "20000/"
 
     print("Reading and parsing files from Google Cloud Storage concurrently...")
     files, outgoing, incoming, graph = parse_links_gcs_concurrent(BUCKET_NAME, PREFIX, max_workers=32)
@@ -141,7 +156,7 @@ def main():
     pagerank = compute_pagerank(files, graph, outgoing)
     print_top_pagerank(pagerank)
 
-    test()
+    # test()
 
 if __name__ == "__main__":
     main()

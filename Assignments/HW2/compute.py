@@ -30,7 +30,7 @@ def parse_single_file(fname, dir_path, files):
     return local_incoming, local_outgoing, local_graph
 
 
-def parse_links(dir_path, max_workers=None):
+def parse_links(dir_path, max_workers=32):
     incoming = defaultdict(int)
     outgoing = defaultdict(int)
     graph = defaultdict(set)
@@ -85,7 +85,6 @@ def compute_pagerank(files, graph, outgoing, tol=0.005, d=0.85):
         for page in files:
             rank_sum = 0.0
             for incoming_page in graph.get(page, []):
-                
                 if outgoing[incoming_page] > 0:
                     rank_sum += pagerank[incoming_page] / outgoing[incoming_page]
             new_pr[page] = base + d * rank_sum
@@ -93,8 +92,12 @@ def compute_pagerank(files, graph, outgoing, tol=0.005, d=0.85):
         old_sum = total_pr(pagerank)
         new_sum = total_pr(new_pr)
         if abs(new_sum - old_sum) / old_sum <= tol:
+            total = sum(new_pr.values())
+            for page in new_pr:
+                new_pr[page] /= total
             print(f"PageRank sum: {sum(new_pr.values()):.6f}")
             return new_pr
+
         pagerank = new_pr
 
 def print_top_pagerank(pagerank, top_n=5):
@@ -154,7 +157,7 @@ def test():
 # main
 def main():
     BASE_DIR = Path(__file__).resolve().parent
-    LINK_DIR = BASE_DIR / "generated_links"
+    LINK_DIR = BASE_DIR / "20000"
 
     if LINK_DIR.exists():
         files, outgoing, incoming, graph = parse_links(LINK_DIR)
