@@ -15,6 +15,9 @@ def file_service(request):
 
     filename = request.args.get("file")
 
+    if "/" in filename:
+        filename = filename.split("/")[-1]
+
     full_path = f"{FOLDER_NAME}/{filename}"
     bucket = storage_client.bucket(BUCKET_NAME)
     blob = bucket.blob(full_path)
