@@ -3,7 +3,6 @@ from google.cloud import storage
 import logging
 
 BUCKET_NAME = "hche-cs528-hw2"
-FOLDER_NAME = "20000"
 
 storage_client = storage.Client(project="superb-memory-485622-u3")
 
@@ -14,11 +13,12 @@ def file_service(request):
         return "Not implemented", 501
 
     filename = request.args.get("file")
+    
+    if not filename:
+        path = request.path
+        filename = path.lstrip("/").split("/")[-1]
 
-    if "/" in filename:
-        filename = filename.split("/")[-1]
-
-    full_path = f"{FOLDER_NAME}/{filename}"
+    full_path = f"20000/{filename}" 
     bucket = storage_client.bucket(BUCKET_NAME)
     blob = bucket.blob(full_path)
 
