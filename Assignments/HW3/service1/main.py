@@ -9,21 +9,16 @@ storage_client = storage.Client(project="superb-memory-485622-u3")
 @functions_framework.http
 def file_service(request):
     if request.method != "GET":
-        logging.error({"error": "Method not implemented", "method": request.method})
         return "Not implemented", 501
 
-    filename = request.args.get("file")
-    
-    if not filename:
-        path = request.path
-        filename = path.lstrip("/").split("/")[-1]
+    path = request.path.lstrip("/")  
 
-    full_path = f"20000/{filename}" 
-    bucket = storage_client.bucket(BUCKET_NAME)
-    blob = bucket.blob(full_path)
+    if path.startswith(f"{BUCKET_NAME}/"):
+        path = path[len(BUCKET_NAME) + 1:]
+    blob = storage_client.bucket(BUCKET_NAME).blob(path)
 
     if not blob.exists():
-        logging.error({"error": "File not found", "filename": filename})
+        logging.error(f"File not found: {path}")
         return "File not found", 404
 
     return blob.download_as_text(), 200
