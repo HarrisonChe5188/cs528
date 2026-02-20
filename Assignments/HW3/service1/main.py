@@ -8,8 +8,10 @@ storage_client = storage.Client(project="superb-memory-485622-u3")
 
 @functions_framework.http
 def file_service(request):
+    
     if request.method != "GET":
-        return "Not implemented", 501
+        print(f"{request.method} not implemented")
+        return (f"{request.method} not implemented", 501)
 
     path = request.path.lstrip("/")  
 
