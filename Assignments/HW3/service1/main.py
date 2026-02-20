@@ -5,11 +5,16 @@ import requests
 
 BUCKET_NAME = "hche-cs528-hw2"
 
+# Forbidden export countries
+FORBIDDEN = {
+    "North Korea", "Iran", "Cuba", "Myanmar",
+    "Iraq", "Libya", "Sudan", "Zimbabwe", "Syria"
+}
+
+SECOND_SERVICE_URL = "http://localhost:8081"
+
 storage_client = storage.Client(project="superb-memory-485622-u3")
 
-FORBIDDEN = {"North Korea","Iran","Cuba","Myanmar","Iraq","Libya","Sudan","Zimbabwe","Syria"}
-
-SECOND_SERVICE_URL = "https://us-central1-superb-memory-485622-u3.cloudfunctions.net/foreign-violation-logger"
 
 @functions_framework.http
 def file_service(request):
@@ -18,15 +23,26 @@ def file_service(request):
 
     if country in FORBIDDEN:
         message = f"Forbidden export attempt from {country}"
-        
-        print(message)
-        logging.warning({"event":"forbidden_country","country":country})
 
-        requests.post(SECOND_SERVICE_URL, json={"message": message})
+        logging.warning({
+            "event": "forbidden_country",
+            "country": country,
+            "path": request.path
+        })
+        print(message)
+
+        try:
+            requests.post(SECOND_SERVICE_URL, json={"message": message})
+        except Exception as e:
+            logging.error(f"Failed to notify local service: {e}")
 
         return ("Permission denied", 400)
 
     if request.method != "GET":
+        logging.warning({
+            "event": "method_not_implemented",
+            "method": request.method
+        })
         print(f"{request.method} not implemented")
         return (f"{request.method} not implemented", 501)
 
@@ -38,6 +54,6 @@ def file_service(request):
 
     if not blob.exists():
         logging.error(f"File not found: {path}")
-        return "File not found", 404
+        return ("File not found", 404)
 
-    return blob.download_as_text(), 200
+    return (blob.download_as_text(), 200)
