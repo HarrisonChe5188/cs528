@@ -1,0 +1,1 @@
+web: functions-framework --target=file_service --port=8080
