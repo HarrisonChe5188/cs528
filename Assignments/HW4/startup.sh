@@ -12,7 +12,10 @@ fi
 # -------------------
 ROLE=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/instance-role" || echo "")
 BUCKET=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/BUCKET" || echo "")
+SCRIPTS_BUCKET=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/SCRIPTS_BUCKET" || echo "$BUCKET")
 PORT=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/PORT" || echo "")
+FOLDER=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/FOLDER" || echo "20000")
+GCP_PROJECT=$(curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/project/project-id" || echo "")
 
 # -------------------
 # Ensure basic tools
@@ -51,22 +54,20 @@ mkdir -p "$HOME_DIR/service"
 cd "$HOME_DIR/service"
 
 if [ "$ROLE" = "webserver" ]; then
-    gsutil -q cp "gs://$BUCKET/service1.py" ./service1.py || true
+    gcloud storage cp "gs://$SCRIPTS_BUCKET/service1.py" ./service1.py
     SERVICE_FILE="$HOME_DIR/service/service1.py"
     SERVICE_NAME="webserver"
     SERVICE_PORT="${PORT:-8080}"
 elif [ "$ROLE" = "forbidden" ]; then
-    gsutil -q cp "gs://$BUCKET/service2.py" ./service2.py || true
+    gcloud storage cp "gs://$SCRIPTS_BUCKET/service2.py" ./service2.py
     SERVICE_FILE="$HOME_DIR/service/service2.py"
     SERVICE_NAME="forbidden"
     SERVICE_PORT="${PORT:-5000}"
 elif [ "$ROLE" = "client" ]; then
-    # client VM: pull the http-client binary so tests can run
-    gsutil -q cp "gs://$BUCKET/http-client" ./http-client || true
+    gcloud storage cp "gs://$SCRIPTS_BUCKET/http-client" ./http-client
     chown "$USERNAME:$USERNAME" ./http-client
     chmod +x ./http-client
     echo "http-client downloaded"
-    # no service to start, just exit after setup
     touch "$LOCKFILE"
     exit 0
 else
@@ -82,7 +83,7 @@ chmod +x "$SERVICE_FILE"
 # Create systemd service unit
 # -------------------
 SERVICE_UNIT="/etc/systemd/system/${SERVICE_NAME}.service"
-cat > "$SERVICE_UNIT" <<EOF
+cat > "$SERVICE_UNIT" <<UNIT
 [Unit]
 Description=hw4 ${SERVICE_NAME} service
 After=network.target
@@ -91,6 +92,10 @@ After=network.target
 User=${USERNAME}
 WorkingDirectory=${HOME_DIR}
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${VENV_DIR}/bin
+Environment=GCP_PROJECT=${GCP_PROJECT}
+Environment=BUCKET=${BUCKET}
+Environment=FOLDER=${FOLDER}
+Environment=PORT=${SERVICE_PORT}
 ExecStart=${VENV_DIR}/bin/python ${SERVICE_FILE}
 Restart=always
 RestartSec=5
@@ -99,7 +104,7 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-EOF
+UNIT
 
 # -------------------
 # Enable & start service

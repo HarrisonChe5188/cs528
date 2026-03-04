@@ -47,7 +47,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         # filename and country header
-        filename = self.path[1:]
+        filename = self.path[1:].split("/")[-1]
         country = (self.headers.get("X-Country") or "").strip()
 
         # check banned
@@ -78,9 +78,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 logger.error(f"GCS write failed: {e}")
 
-            self.send_response(403)
+            self.send_response(400)
             self.end_headers()
-            self.wfile.write(b"403 Forbidden\n")
+            self.wfile.write(b"400 Bad Request\n")
             return
 
         # normal flow: file exists?
