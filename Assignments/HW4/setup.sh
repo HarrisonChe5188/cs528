@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ------------ CONFIG (edit only if needed) -------------
 PROJECT_ID="$(gcloud config get-value project 2>/dev/null || echo "")"
 : "${PROJECT_ID:?Project must be set via 'gcloud config set project' or edit this script.}"
 ZONE="${ZONE:-us-central1-a}"
@@ -22,7 +21,6 @@ FIREWALL_TAG_FORB="forbidden-service"
 WEB_PORT="8080"
 FORB_PORT="5000"
 MACHINE_TYPE="${MACHINE_TYPE:-e2-micro}"
-# -------------------------------------------------------
 
 ACTIVE_ACCOUNTS=$(gcloud auth list --format="value(account)" 2>/dev/null || true)
 if [ -z "$ACTIVE_ACCOUNTS" ]; then
@@ -33,7 +31,7 @@ fi
 echo "Using project: $PROJECT_ID"
 gcloud config set project "$PROJECT_ID"
 
-# Enable required APIs (idempotent)
+# Enable required APIs 
 gcloud services enable storage.googleapis.com pubsub.googleapis.com compute.googleapis.com iam.googleapis.com --quiet || true
 
 # Create scripts bucket if it doesn't exist
@@ -47,7 +45,7 @@ else
   echo "Bucket gs://$BUCKET already exists — reusing."
 fi
 
-# Always upload latest service files (no --no-clobber so stale versions are overwritten)
+# Always upload latest service files
 echo "Uploading service files to gs://$BUCKET ..."
 gcloud storage cp --quiet ./service1.py "gs://$BUCKET/service1.py" || true
 gcloud storage cp --quiet ./service2.py "gs://$BUCKET/service2.py" || true
@@ -186,3 +184,4 @@ fi
 
 echo "Setup complete."
 echo "Webserver should be at: http://${STATIC_IP}:${WEB_PORT}"
+echo "There are still updates and installations being run. PLease wait around 10 minutes before testing the service to allow everything to finish."
