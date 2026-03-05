@@ -33,6 +33,9 @@ fi
 echo "Using project: $PROJECT_ID"
 gcloud config set project "$PROJECT_ID"
 
+# Enable required APIs (idempotent)
+gcloud services enable storage.googleapis.com pubsub.googleapis.com compute.googleapis.com iam.googleapis.com --quiet || true
+
 # Create scripts bucket if it doesn't exist
 if ! gcloud storage buckets list --filter="name:$BUCKET" --format="value(name)" | grep -q . ; then
   echo "Creating bucket gs://$BUCKET (location $BUCKET_LOCATION)"
@@ -46,11 +49,11 @@ fi
 
 # Always upload latest service files (no --no-clobber so stale versions are overwritten)
 echo "Uploading service files to gs://$BUCKET ..."
-gcloud storage cp --quiet ./service1.py "gs://$BUCKET/service1.py"
-gcloud storage cp --quiet ./service2.py "gs://$BUCKET/service2.py"
-gcloud storage cp --quiet ./startup.sh  "gs://$BUCKET/startup.sh"
+gcloud storage cp --quiet ./service1.py "gs://$BUCKET/service1.py" || true
+gcloud storage cp --quiet ./service2.py "gs://$BUCKET/service2.py" || true
+gcloud storage cp --quiet ./startup.sh  "gs://$BUCKET/startup.sh" || true
 if [ -f ./http-client ]; then
-  gcloud storage cp --quiet ./http-client "gs://$BUCKET/http-client"
+  gcloud storage cp --quiet ./http-client "gs://$BUCKET/http-client" || true
 fi
 
 # Create service accounts
@@ -159,22 +162,24 @@ if ! gcloud compute instances describe "$FORB_VM_NAME" --zone "$ZONE" >/dev/null
     --tags="$FIREWALL_TAG_FORB" \
     --service-account="$FORB_SA_EMAIL" \
     --metadata-from-file=startup-script=./startup.sh \
-    --metadata=instance-role=forbidden,BUCKET="$BUCKET",PORT="$FORB_PORT"
+    --metadata=instance-role=forbidden,BUCKET="$BUCKET",SCRIPTS_BUCKET="$BUCKET",PORT="$FORB_PORT"
   echo "Created forbidden VM: $FORB_VM_NAME"
 else
   echo "Instance $FORB_VM_NAME already exists"
 fi
 
-# Create client VM
+# Create client VM (IMPORTANT: attach a service account so it can access GCS)
 if ! gcloud compute instances describe "$CLIENT_VM_NAME" --zone "$ZONE" >/dev/null 2>&1; then
+  # Reuse web service account for the client VM so it has storage access
   gcloud compute instances create "$CLIENT_VM_NAME" \
     --zone="$ZONE" \
     --machine-type="$MACHINE_TYPE" \
     --image-family="$IMAGE_FAMILY" \
     --image-project="$IMAGE_PROJECT" \
+    --service-account="$WEB_SA_EMAIL" \
     --metadata-from-file=startup-script=./startup.sh \
-    --metadata=instance-role=client,BUCKET="$BUCKET"
-  echo "Created client VM: $CLIENT_VM_NAME"
+    --metadata=instance-role=client,BUCKET="$BUCKET",SCRIPTS_BUCKET="$BUCKET"
+  echo "Created client VM: $CLIENT_VM_NAME (attached service account $WEB_SA_EMAIL)"
 else
   echo "Instance $CLIENT_VM_NAME already exists"
 fi
