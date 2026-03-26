@@ -9,8 +9,8 @@ PROJECT_ID = os.environ["GCP_PROJECT"]
 INSTANCE = os.environ["CLOUDSQL_INSTANCE"]
 TIMEZONE = os.environ.get("MONITOR_TIMEZONE", "America/New_York")
 
-ALLOW_START_HOUR = int(os.environ.get("ALLOW_START_HOUR", "0"))
-ALLOW_END_HOUR = int(os.environ.get("ALLOW_END_HOUR", "24"))
+ALLOW_START_HOUR = int(os.environ.get("ALLOW_START_HOUR", "12"))
+ALLOW_END_HOUR = int(os.environ.get("ALLOW_END_HOUR", "22"))
 
 
 def monitor_database(request):
