@@ -20,10 +20,9 @@ def stats(name, vals):
         print(f"{name}: no data")
         return
     avg = sum(vals)/len(vals)/1e6
-    print(f"{name}: avg={avg:.2f}ms  min={min(vals)/1e6:.2f}ms  max={max(vals)/1e6:.2f}ms  samples={len(vals)}")
+    print(f"{name}: avg={avg:.2f}ms  min={min(vals)/1e6:.2f}ms  max={max(vals)/1e6:.2f}ms ")
 
 stats("Header extraction", headers)
 stats("GCS read        ", reads)
 stats("Send response   ", sends)
 stats("DB insert       ", dbs)
-stats("Total request   ", totals)
