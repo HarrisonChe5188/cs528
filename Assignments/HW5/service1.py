@@ -12,7 +12,6 @@ from google.api_core.exceptions import NotFound
 from google.cloud import logging as cloud_logging
 from google.cloud import pubsub_v1
 from google.cloud import storage
-import mysql.connector
 from mysql.connector import pooling
 
 # ----------------------------
@@ -22,6 +21,7 @@ PROJECT = os.environ.get("GCP_PROJECT", "superb-memory-485622-u3")
 BUCKET = os.environ.get("BUCKET", "hche-cs528-hw2")
 FOLDER = os.environ.get("FOLDER", "20000")
 PORT = int(os.environ.get("PORT", "8080"))
+
 FORB_TOPIC = os.environ.get(
     "FORB_TOPIC", f"projects/{PROJECT}/topics/hw5-forbidden-exports"
 )
@@ -59,23 +59,18 @@ def _now_utc():
     return datetime.now(timezone.utc)
 
 
-def _pick_header(headers, *names, default=""):
+def _pick_header(headers, *names):
     for name in names:
         val = headers.get(name)
-        if val is not None:
-            val = val.strip()
-            if val:
-                return val
-    return default
+        if val:
+            return val.strip()
+    return None
 
 
 def _client_ip(handler):
     forwarded = _pick_header(
         handler.headers,
-        "X-Forwarded-For",
-        "X-Real-IP",
-        "Client-IP",
-        default=""
+        "X-Forwarded-For", "X-Real-IP", "Client-IP"
     )
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -84,37 +79,49 @@ def _client_ip(handler):
 
 def _requested_file(path):
     parsed = urlparse(path).path
-    name = parsed.rsplit("/", 1)[-1].strip()
-    return name
+    return parsed.rsplit("/", 1)[-1].strip()
 
 
+# ----------------------------
+# HEADER EXTRACTION (TIMED)
+# ----------------------------
 def _extract_request_context(handler):
     start = time.perf_counter_ns()
 
     country = _pick_header(handler.headers, "X-Country", "Country")
     gender = _pick_header(handler.headers, "X-Gender", "Gender")
-    age = _pick_header(handler.headers, "X-Age", "Age")
+    age_raw = _pick_header(handler.headers, "X-Age", "Age")
     income = _pick_header(handler.headers, "X-Income", "Income")
+
+    age = int(age_raw) if age_raw and age_raw.isdigit() else None
+
     requested_file = _requested_file(handler.path)
     client_ip = _client_ip(handler)
-    request_time = _now_utc()
-    is_banned = country.strip().lower() in BANNED_COUNTRIES if country else False
+    now = _now_utc()
+
+    country_clean = country.lower() if country else None
+    is_banned = country_clean in BANNED_COUNTRIES if country_clean else False
 
     elapsed = time.perf_counter_ns() - start
+
     return {
-        "country": country or None,
-        "client_ip": client_ip or None,
-        "gender": gender or None,
-        "age": age or None,
-        "income": income or None,
+        "country": country_clean,
+        "client_ip": client_ip,
+        "gender": gender,
+        "age": age,
+        "income": income,
         "is_banned": is_banned,
-        "time_of_day": request_time,
-        "requested_file": requested_file or None,
+        "time_of_day": now.hour,
+        "timestamp": now,
+        "requested_file": requested_file,
         "path": handler.path,
         "headers_ns": elapsed,
     }
 
 
+# ----------------------------
+# DB
+# ----------------------------
 def _create_pool():
     return pooling.MySQLConnectionPool(
         pool_name="mypool",
@@ -128,72 +135,23 @@ def _create_pool():
 
 def _ensure_db_pool():
     global _db_pool
-    if _db_pool is not None:
+    if _db_pool:
         return _db_pool
 
     with _db_lock:
-        if _db_pool is not None:
+        if _db_pool:
             return _db_pool
+
         try:
-            pool_obj = _create_pool()
-            _db_pool = pool_obj
+            _db_pool = _create_pool()
             logger.info("Connected to Cloud SQL.")
-            _init_db()
             return _db_pool
         except Exception as exc:
             raise RuntimeError(f"Cloud SQL connection failed: {exc}")
 
 
-_db_initialized = False
-_db_init_lock = threading.Lock()
-
-def _init_db():
-    global _db_initialized
-    if _db_initialized:
-        return
-
-    with _db_init_lock:
-        if _db_initialized:
-            return
-
-        conn = _ensure_db_pool().get_connection()
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS request_logs (
-                id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                country TEXT,
-                client_ip TEXT,
-                gender TEXT,
-                age TEXT,
-                income TEXT,
-                is_banned BOOLEAN,
-                time_of_day DATETIME,
-                requested_file TEXT
-            )
-            """)
-
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS error_logs (
-                id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                time_of_request DATETIME,
-                requested_file TEXT,
-                error_code INT
-            )
-            """)
-
-            conn.commit()
-            logger.info("Database tables ensured.")
-            _db_initialized = True
-
-        finally:
-            cursor.close()
-            conn.close()
-
 def _db_execute(sql, params):
-    pool = _ensure_db_pool()
-    conn = pool.get_connection()
+    conn = _ensure_db_pool().get_connection()
     cursor = conn.cursor()
 
     start = time.perf_counter_ns()
@@ -208,34 +166,30 @@ def _db_execute(sql, params):
 
 
 def _record_success(ctx):
-    sql = """
+    return _db_execute("""
         INSERT INTO request_logs
         (country, client_ip, gender, age, income, is_banned, time_of_day, requested_file)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
-    """
-    params = (
-        ctx["country"],
-        ctx["client_ip"],
-        ctx["gender"],
-        ctx["age"],
-        ctx["income"],
-        ctx["is_banned"],
-        ctx["time_of_day"],
-        ctx["requested_file"],
-    )
-    return _db_execute(sql, params)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (
+        ctx["country"], ctx["client_ip"], ctx["gender"],
+        ctx["age"], ctx["income"], ctx["is_banned"],
+        ctx["time_of_day"], ctx["requested_file"]
+    ))
 
 
-def _record_error(ctx, error_code):
-    sql = """
+def _record_error(ctx, code):
+    return _db_execute("""
         INSERT INTO error_logs
         (time_of_request, requested_file, error_code)
-        VALUES (%s, %s, %s);
-    """
-    params = (ctx["time_of_day"], ctx["requested_file"], error_code)
-    return _db_execute(sql, params)
+        VALUES (%s,%s,%s)
+    """, (
+        ctx["timestamp"], ctx["requested_file"], code
+    ))
 
 
+# ----------------------------
+# GCS
+# ----------------------------
 def _download_file(filename):
     start = time.perf_counter_ns()
     blob = storage_client.bucket(BUCKET).blob(f"{FOLDER}/{filename}")
@@ -243,160 +197,120 @@ def _download_file(filename):
     return data, time.perf_counter_ns() - start
 
 
+# ----------------------------
+# PUBSUB
+# ----------------------------
 def _publish_forbidden(ctx):
     payload = {
         "event": "forbidden_country_request",
         "country": ctx["country"],
         "client_ip": ctx["client_ip"],
         "file": ctx["requested_file"],
-        "path": ctx["path"],
-        "timestamp": ctx["time_of_day"].isoformat(),
+        "timestamp": ctx["timestamp"].isoformat(),
     }
     try:
-        future = publisher.publish(
-            FORB_TOPIC,
-            json.dumps(payload).encode("utf-8")
-        )
-        future.result(timeout=5)
-    except Exception as exc:
-        logger.error("Failed to publish forbidden event: %s", exc)
+        publisher.publish(FORB_TOPIC, json.dumps(payload).encode()).result(timeout=5)
+    except Exception as e:
+        logger.error(f"PubSub error: {e}")
 
 
-def _send_bytes(handler, status_code, body, content_type="text/plain; charset=utf-8"):
+# ----------------------------
+# RESPONSE (TIMED)
+# ----------------------------
+def _send(handler, code, body, ctype):
     start = time.perf_counter_ns()
-    handler.send_response(status_code)
-    handler.send_header("Content-Type", content_type)
+    handler.send_response(code)
+    handler.send_header("Content-Type", ctype)
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
     return time.perf_counter_ns() - start
 
 
+# ----------------------------
+# HANDLER
+# ----------------------------
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
+    def log_message(self, *args):
         return
 
-    def _handle_get(self):
-        request_start = time.perf_counter_ns()
+    def do_GET(self):
+        start = time.perf_counter_ns()
         ctx = _extract_request_context(self)
 
-        status_code = 200
+        status = 200
         body = b""
         read_ns = 0
         db_ns = 0
 
         try:
             if not ctx["requested_file"]:
-                status_code = 404
+                status = 404
                 body = b"404 Not Found\n"
+                logger.warning(f"404 Not Found: {ctx['requested_file']}")
+
             elif ctx["is_banned"]:
-                status_code = 400
+                status = 400
                 body = b"400 Bad Request\n"
+                logger.critical(json.dumps({
+                    "event": "forbidden_country_request",
+                    "country": ctx["country"],
+                    "file": ctx["requested_file"],
+                    "client_ip": ctx["client_ip"]
+                }))
                 _publish_forbidden(ctx)
+
             else:
                 try:
                     body, read_ns = _download_file(ctx["requested_file"])
-                    status_code = 200
                 except NotFound:
-                    status_code = 404
+                    status = 404
                     body = b"404 Not Found\n"
-                except Exception as exc:
-                    logger.error("Error reading file from GCS: %s", exc)
-                    status_code = 500
+                    logger.warning(f"404 Not Found: {ctx['requested_file']}")
+                except Exception as e:
+                    status = 500
                     body = b"500 Internal Server Error\n"
+                    logger.error(f"GCS error: {e}")
 
-            if status_code == 200:
-                try:
-                    db_ns = _record_success(ctx)
-                except Exception as exc:
-                    logger.error("Failed to insert success row: %s", exc)
+            if status == 200:
+                db_ns = _record_success(ctx)
             else:
-                try:
-                    db_ns = _record_error(ctx, status_code)
-                except Exception as exc:
-                    logger.error("Failed to insert error row: %s", exc)
+                db_ns = _record_error(ctx, status)
 
-            send_ns = _send_bytes(
+            send_ns = _send(
                 self,
-                status_code,
+                status,
                 body,
-                content_type="text/html; charset=utf-8" if status_code == 200 else "text/plain; charset=utf-8",
+                "text/html" if status == 200 else "text/plain"
             )
-        except Exception as exc:
-            logger.error("Unhandled request error: %s", exc)
-            try:
-                _record_error(ctx, 500)
-            except Exception:
-                pass
-            send_ns = _send_bytes(self, 500, b"500 Internal Server Error\n")
-            status_code = 500
 
-        total_ns = time.perf_counter_ns() - request_start
-        logger.info(
-            json.dumps(
-                {
-                    "status_code": status_code,
-                    "country": ctx["country"],
-                    "client_ip": ctx["client_ip"],
-                    "gender": ctx["gender"],
-                    "age": ctx["age"],
-                    "income": ctx["income"],
-                    "is_banned": ctx["is_banned"],
-                    "requested_file": ctx["requested_file"],
-                    "headers_ns": ctx["headers_ns"],
-                    "read_ns": read_ns,
-                    "send_ns": send_ns,
-                    "db_ns": db_ns,
-                    "total_ns": total_ns,
-                }
-            )
-        )
+        except Exception as e:
+            logger.error(f"Unhandled: {e}")
+            status = 500
+            send_ns = _send(self, 500, b"500 Internal Server Error\n", "text/plain")
 
-    def do_GET(self):
-        self._handle_get()
+        total_ns = time.perf_counter_ns() - start
 
-    def _handle_other_methods(self):
-        request_start = time.perf_counter_ns()
+        logger.info(json.dumps({
+            "status_code": status,
+            "headers_ns": ctx["headers_ns"],
+            "read_ns": read_ns,
+            "db_ns": db_ns,
+            "send_ns": send_ns,
+            "total_ns": total_ns
+        }))
+
+    def _other(self):
         ctx = _extract_request_context(self)
-        status_code = 501
-        body = b"501 Not Implemented\n"
+        logger.warning(f"501 Not Implemented: {self.command} {self.path}")
+        _record_error(ctx, 501)
+        _send(self, 501, b"501 Not Implemented\n", "text/plain")
 
-        try:
-            _record_error(ctx, status_code)
-        except Exception as exc:
-            logger.error("Failed to log 501 error: %s", exc)
-
-        send_ns = _send_bytes(self, status_code, body)
-        total_ns = time.perf_counter_ns() - request_start
-        logger.info(
-            json.dumps(
-                {
-                    "status_code": status_code,
-                    "country": ctx["country"],
-                    "client_ip": ctx["client_ip"],
-                    "gender": ctx["gender"],
-                    "age": ctx["age"],
-                    "income": ctx["income"],
-                    "is_banned": ctx["is_banned"],
-                    "requested_file": ctx["requested_file"],
-                    "headers_ns": ctx["headers_ns"],
-                    "read_ns": 0,
-                    "send_ns": send_ns,
-                    "db_ns": 0,
-                    "total_ns": total_ns,
-                }
-            )
-        )
-
-    do_POST = _handle_other_methods
-    do_PUT = _handle_other_methods
-    do_DELETE = _handle_other_methods
-    do_HEAD = _handle_other_methods
-    do_CONNECT = _handle_other_methods
-    do_OPTIONS = _handle_other_methods
-    do_TRACE = _handle_other_methods
-    do_PATCH = _handle_other_methods
+    do_POST = do_PUT = do_DELETE = do_HEAD = do_OPTIONS = do_TRACE = do_PATCH = _other
 
 
+# ----------------------------
+# MAIN
+# ----------------------------
 if __name__ == "__main__":
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()
