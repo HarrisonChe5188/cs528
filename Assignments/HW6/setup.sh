@@ -14,6 +14,7 @@ REGION="${REGION:-us-central1}"
 WEB_VM_NAME="${WEB_VM_NAME:-webserver}"
 FORB_VM_NAME="${FORB_VM_NAME:-forbidden}"
 CLIENT_VM_NAME="${CLIENT_VM_NAME:-client}"
+ML_VM_NAME="${ML_VM_NAME:-ml-vm}"
 
 IMAGE_FAMILY="${IMAGE_FAMILY:-ubuntu-2404-lts-amd64}"
 IMAGE_PROJECT="${IMAGE_PROJECT:-ubuntu-os-cloud}"
@@ -26,6 +27,7 @@ BUCKET_LOCATION="${BUCKET_LOCATION:-US}"
 WEB_SA_NAME="${WEB_SA_NAME:-web-server-sa}"
 FORB_SA_NAME="${FORB_SA_NAME:-forbidden-sa}"
 CLIENT_SA_NAME="${CLIENT_SA_NAME:-client-sa}"
+ML_SA_NAME="${ML_SA_NAME:-hw6-ml-sa}"
 
 STATIC_IP_NAME="${STATIC_IP_NAME:-webserver-ip}"
 FIREWALL_TAG_WEB="${FIREWALL_TAG_WEB:-webserver}"
@@ -65,9 +67,18 @@ trap cleanup_proxy EXIT
 
 start_local_proxy() {
   log "Downloading Cloud SQL Auth Proxy..."
-  curl -fsSL \
-    "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.21.2/cloud-sql-proxy.linux.amd64" \
-    -o "${PROXY_BIN}"
+
+  ARCH="$(uname -m)"
+  if [ "${ARCH}" = "x86_64" ]; then
+    PROXY_URL="https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.21.2/cloud-sql-proxy.linux.amd64"
+  elif [ "${ARCH}" = "aarch64" ] || [ "${ARCH}" = "arm64" ]; then
+    PROXY_URL="https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.21.2/cloud-sql-proxy.linux.arm64"
+  else
+    log "ERROR: unsupported architecture '${ARCH}'"
+    exit 1
+  fi
+
+  curl -fsSL "${PROXY_URL}" -o "${PROXY_BIN}"
   chmod +x "${PROXY_BIN}"
 
   log "Starting local proxy for ${CLOUD_SQL_CONNECTION_NAME} on 127.0.0.1:3306..."
@@ -193,14 +204,16 @@ gcloud storage cp --quiet ./service1.py       "gs://${SCRIPT_BUCKET}/service1.py
 gcloud storage cp --quiet ./service2.py       "gs://${SCRIPT_BUCKET}/service2.py"
 gcloud storage cp --quiet ./startup.sh        "gs://${SCRIPT_BUCKET}/startup.sh"
 gcloud storage cp --quiet ./setup_schema.py   "gs://${SCRIPT_BUCKET}/setup_schema.py"
-gcloud storage cp --quiet ./http-client "gs://${SCRIPT_BUCKET}/http-client"
+gcloud storage cp --quiet ./http-client       "gs://${SCRIPT_BUCKET}/http-client"
+gcloud storage cp --quiet ./hw6_model.py      "gs://${SCRIPT_BUCKET}/hw6_model.py"
 
 # ---- Service accounts ------------------------------------------------------
 WEB_SA_EMAIL="${WEB_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 FORB_SA_EMAIL="${FORB_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 CLIENT_SA_EMAIL="${CLIENT_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+ML_SA_EMAIL="${ML_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
-for sa_name in "${WEB_SA_NAME}" "${FORB_SA_NAME}" "${CLIENT_SA_NAME}"; do
+for sa_name in "${WEB_SA_NAME}" "${FORB_SA_NAME}" "${CLIENT_SA_NAME}" "${ML_SA_NAME}"; do
   sa_email="${sa_name}@${PROJECT_ID}.iam.gserviceaccount.com"
   if ! gcloud iam service-accounts list \
        --filter="email:${sa_email}" \
@@ -235,6 +248,21 @@ done
 # Client SA roles
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:${CLIENT_SA_EMAIL}" \
+  --role="roles/storage.objectViewer" --quiet || true
+
+# ML SA roles
+for role in roles/cloudsql.client roles/logging.logWriter; do
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:${ML_SA_EMAIL}" \
+    --role="${role}" --quiet || true
+done
+
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${ML_SA_EMAIL}" \
+  --role="roles/storage.objectCreator" --quiet || true
+
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${ML_SA_EMAIL}" \
   --role="roles/storage.objectViewer" --quiet || true
 
 # ---- Static IP -------------------------------------------------------------
@@ -399,6 +427,26 @@ if ! gcloud compute instances describe "${CLIENT_VM_NAME}" \
 else
   log "VM '${CLIENT_VM_NAME}' already exists – starting if stopped..."
   gcloud compute instances start "${CLIENT_VM_NAME}" \
+    --zone="${ZONE}" --project="${PROJECT_ID}" --quiet || true
+fi
+
+if ! gcloud compute instances describe "${ML_VM_NAME}" \
+       --zone="${ZONE}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  log "Creating ML VM '${ML_VM_NAME}'..."
+  gcloud compute instances create "${ML_VM_NAME}" \
+    --zone="${ZONE}" \
+    --machine-type="${MACHINE_TYPE}" \
+    --image-family="${IMAGE_FAMILY}" \
+    --image-project="${IMAGE_PROJECT}" \
+    --scopes=cloud-platform \
+    --service-account="${ML_SA_EMAIL}" \
+    --metadata-from-file=startup-script=./startup.sh \
+    --metadata="instance-role=ml-runner,SCRIPTS_BUCKET=${SCRIPT_BUCKET},OUTPUT_BUCKET=${DATA_BUCKET},CLOUD_SQL_CONNECTION_NAME=${CLOUD_SQL_CONNECTION_NAME},DB_NAME=${DB_NAME},DB_USER=${DB_USER},DB_PASSWORD=${DB_PASSWORD},GCP_PROJECT=${PROJECT_ID}" \
+    --project="${PROJECT_ID}" \
+    --quiet
+else
+  log "VM '${ML_VM_NAME}' already exists – starting if stopped..."
+  gcloud compute instances start "${ML_VM_NAME}" \
     --zone="${ZONE}" --project="${PROJECT_ID}" --quiet || true
 fi
 

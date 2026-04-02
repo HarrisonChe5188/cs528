@@ -12,7 +12,7 @@ FORB_VM_NAME="${FORB_VM_NAME:-forbidden}"
 CLIENT_VM_NAME="${CLIENT_VM_NAME:-client}"
 CLOUDSQL_INSTANCE="${CLOUDSQL_INSTANCE:-hw5-mysql}"
 
-gcloud compute instances stop "${WEB_VM_NAME}" "${FORB_VM_NAME}" "${CLIENT_VM_NAME}" \
+gcloud compute instances delete "${WEB_VM_NAME}" "${FORB_VM_NAME}" "${CLIENT_VM_NAME}" "${ML_VM_NAME}" \
   --zone="${ZONE}" \
   --quiet || true
 
@@ -21,4 +21,4 @@ gcloud sql instances patch "${CLOUDSQL_INSTANCE}" \
   --quiet || true
 
 
-echo "Stopped VMs, Cloud Functions, and Cloud SQL."
+echo "Deleted VMs, Cloud Functions, and Cloud SQL."

@@ -159,24 +159,62 @@ def _db_execute(sql, params):
     return time.perf_counter_ns() - start
 
 
+# ----------------------------
+# MySQL helper functions (3NF-aware)
+# ----------------------------
+def _record_client_if_missing(client_ip, country):
+    """Insert into clients only if the client_ip doesn't exist."""
+    if not client_ip:
+        return
+
+    pool = _ensure_db_pool()
+    conn = pool.get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT IGNORE INTO clients(client_ip, country) VALUES (%s, %s)",
+            (client_ip, country)
+        )
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def _record_success(ctx):
+    """
+    Insert a request into request_logs and ensure the client exists in clients.
+    """
+    client_ip = ctx.get("client_ip")
+    country = ctx.get("country")
+
+    # Ensure the client exists in clients table
+    _record_client_if_missing(client_ip, country)
+
     sql = """
         INSERT INTO request_logs
-        (country, client_ip, gender, age, income, is_banned, time_of_day, requested_file)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+        (client_ip, gender, age, income, is_banned, time_of_day, requested_file)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     """
     params = (
-        ctx["country"], ctx["client_ip"], ctx["gender"], ctx["age"],
-        ctx["income"], ctx["is_banned"], ctx["time_of_day"], ctx["requested_file"]
+        client_ip,
+        ctx.get("gender"),
+        ctx.get("age"),
+        ctx.get("income"),
+        ctx.get("is_banned"),
+        ctx.get("time_of_day"),
+        ctx.get("requested_file")
     )
+
     return _db_execute(sql, params)
 
 
 def _record_error(ctx, error_code):
+    """Insert into error_logs (unchanged from original)."""
     sql = """
         INSERT INTO error_logs
         (time_of_request, requested_file, error_code)
-        VALUES (%s, %s, %s);
+        VALUES (%s, %s, %s)
     """
     params = (ctx["time_of_day"], ctx["requested_file"], error_code)
     return _db_execute(sql, params)

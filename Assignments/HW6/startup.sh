@@ -27,6 +27,7 @@ PORT="$(_meta PORT)"
 [ -z "$PORT" ] && PORT="8080"
 FOLDER="$(_meta FOLDER)"
 [ -z "$FOLDER" ] && FOLDER="20000"
+OUTPUT_BUCKET="$(_meta OUTPUT_BUCKET)"
 GCP_PROJECT="$(_project)"
 
 CLOUD_SQL_CONNECTION_NAME="$(_meta CLOUD_SQL_CONNECTION_NAME)"
@@ -46,7 +47,7 @@ apt-get install -y --no-install-recommends \
     python3-venv python3-pip curl ca-certificates
 
 # ---------------------------------------------------------------------------
-# App user + venv
+# App user + venv helper
 # ---------------------------------------------------------------------------
 APP_USER="hw5app"
 APP_HOME="/home/${APP_USER}"
@@ -144,7 +145,6 @@ UNIT
     systemctl daemon-reload
     systemctl enable cloud-sql-proxy webserver
     systemctl start cloud-sql-proxy
-    # Give the proxy a moment before starting the web server
     sleep 5
     systemctl start webserver
 
@@ -191,6 +191,63 @@ elif [ "$ROLE" = "client" ]; then
     chown "${APP_USER}:${APP_USER}" http-client
     chmod +x http-client
 
+# ---------------------------------------------------------------------------
+# Role: ML runner
+# ---------------------------------------------------------------------------
+elif [ "$ROLE" = "ml-runner" ]; then
+
+    echo "Setting up ML VM environment..."
+
+    APP_USER="hw6ml"
+    APP_HOME="/home/${APP_USER}"
+    if ! id "${APP_USER}" >/dev/null 2>&1; then
+        useradd -m -s /bin/bash "${APP_USER}"
+    fi
+
+    VENV_DIR="/opt/hw6-venv"
+    if [ ! -d "${VENV_DIR}" ]; then
+        python3 -m venv "${VENV_DIR}"
+    fi
+    source "${VENV_DIR}/bin/activate"
+    pip install --upgrade pip --quiet
+    pip install --quiet \
+        google-cloud-storage \
+        google-cloud-logging \
+        mysql-connector-python \
+        pandas \
+        scikit-learn
+
+    download_from_gcs "$SCRIPTS_BUCKET" "hw6_model.py" "./hw6_model.py"
+    chown "${APP_USER}:${APP_USER}" hw6_model.py
+    chmod +x hw6_model.py
+
+    # Install Cloud SQL Auth Proxy
+    curl -fsSL \
+        "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.21.2/cloud-sql-proxy.linux.amd64" \
+        -o /usr/local/bin/cloud-sql-proxy
+    chmod +x /usr/local/bin/cloud-sql-proxy
+
+    # Start proxy
+    /usr/local/bin/cloud-sql-proxy --address 127.0.0.1 --port 3306 ${CLOUD_SQL_CONNECTION_NAME} &
+    sleep 10
+
+    # Run ML script
+    export DB_HOST=127.0.0.1
+    export DB_PORT=3306
+    export DB_USER=${DB_USER}
+    export DB_PASSWORD=${DB_PASSWORD}
+    export DB_NAME=${DB_NAME}
+    export OUTPUT_BUCKET=${OUTPUT_BUCKET}
+    export GCP_PROJECT=${GCP_PROJECT}
+    python3 hw6_model.py
+
+    # Print outputs
+    echo "Model outputs:"
+    gsutil ls gs://${OUTPUT_BUCKET}/hw6_outputs/**
+
+# ---------------------------------------------------------------------------
+# Unknown role
+# ---------------------------------------------------------------------------
 else
     echo "WARNING: unknown instance-role '${ROLE}' – nothing to start."
 fi

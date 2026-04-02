@@ -9,6 +9,7 @@ REGION="${REGION:-us-central1}"
 WEB_VM_NAME="${WEB_VM_NAME:-webserver}"
 FORB_VM_NAME="${FORB_VM_NAME:-forbidden}"
 CLIENT_VM_NAME="${CLIENT_VM_NAME:-client}"
+ML_VM_NAME="${ML_VM_NAME:-ml-vm}"
 
 STATIC_IP_NAME="${STATIC_IP_NAME:-webserver-ip}"
 FIREWALL_TAG_WEB="${FIREWALL_TAG_WEB:-webserver}"
@@ -31,7 +32,7 @@ CLIENT_SA_EMAIL="${CLIENT_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 gcloud config set project "${PROJECT_ID}"
 
-gcloud compute instances delete "${WEB_VM_NAME}" "${FORB_VM_NAME}" "${CLIENT_VM_NAME}" \
+gcloud compute instances delete "${WEB_VM_NAME}" "${FORB_VM_NAME}" "${CLIENT_VM_NAME}" "${ML_VM_NAME}" \
   --zone="${ZONE}" --quiet || true
 
 gcloud compute firewall-rules delete "${FIREWALL_TAG_WEB}" "${FIREWALL_TAG_FORB}" \
