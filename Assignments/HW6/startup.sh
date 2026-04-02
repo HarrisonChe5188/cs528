@@ -67,7 +67,8 @@ pip install --quiet \
     google-cloud-storage \
     google-cloud-logging \
     google-cloud-pubsub \
-    mysql-connector-python
+    mysql-connector-python \
+    sqlalchemy
 
 # ---------------------------------------------------------------------------
 # Download helper
