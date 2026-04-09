@@ -8,7 +8,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 PROJECT_ID="superb-memory-485622-u3"      # ← hardcoded as required by spec
 
-ZONE="${ZONE:-us-central1-a}"
+ZONE="${ZONE:-us-central1-f}"
 REGION="${REGION:-us-central1}"
 
 WEB_VM_NAME="${WEB_VM_NAME:-webserver}"
