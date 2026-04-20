@@ -1,0 +1,18 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    google-cloud-storage \
+    google-cloud-logging \
+    google-cloud-pubsub
+
+# Copy the web server script
+COPY service1.py .
+
+# Expose the port
+EXPOSE 8080
+
+# Run the web server
+CMD ["python", "service1.py"]

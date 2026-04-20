@@ -1,0 +1,85 @@
+# hw9-webserver.yaml
+# Deploy the HW9 web server container to GKE.
+#
+# Before applying:
+#   1. Build & push image (see deploy-gke-hw9.sh)
+#   2. Ensure Workload Identity is enabled on your cluster
+# -----------------------------------------------------------------------
+
+# --- Kubernetes ServiceAccount (maps to GCP SA via Workload Identity) ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: web-server-ksa
+  namespace: default
+  annotations:
+    # Maps this K8s SA to your GCP SA so the pod can call GCS/Pub/Sub/Logging
+    iam.gke.io/gcp-service-account: web-server-sa@superb-memory-485622-u3.iam.gserviceaccount.com
+
+---
+# --- ConfigMap: non-secret runtime config ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webserver-config
+  namespace: default
+data:
+  GCP_PROJECT: "superb-memory-485622-u3"
+  BUCKET:      "hche-cs528-hw2"
+  FOLDER:      "20000"
+  PORT:        "8080"
+  FORB_TOPIC:  "projects/superb-memory-485622-u3/topics/hw4-forbidden-exports"
+
+---
+# --- Deployment ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webserver
+  namespace: default
+  labels:
+    app: webserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webserver
+  template:
+    metadata:
+      labels:
+        app: webserver
+    spec:
+      serviceAccountName: web-server-ksa
+      containers:
+        - name: webserver
+          # Replaced by deploy-gke-hw9.sh at deploy time
+          image: us-central1-docker.pkg.dev/superb-memory-485622-u3/hw9-repo/webserver:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: webserver-config
+          resources:
+            requests:
+              cpu:    "100m"
+              memory: "128Mi"
+            limits:
+              cpu:    "500m"
+              memory: "256Mi"
+
+---
+# --- Service: exposes the deployment with a public LoadBalancer IP ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webserver-svc
+  namespace: default
+spec:
+  type: LoadBalancer
+  selector:
+    app: webserver
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
